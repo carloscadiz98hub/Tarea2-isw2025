@@ -4,6 +4,7 @@ import { handleSuccess, handleErrorClient, handleErrorServer } from "../Handlers
 import { AppDataSource } from "../config/configDB.js";
 import { User } from "../entities/user.entity.js";
 import bcrypt from "bcrypt";
+import {usuarioBodyValidation} from "../validations/user.validations.js";
 
 export async function login(req, res) {
   try {
@@ -21,23 +22,30 @@ export async function login(req, res) {
 }
 
 export async function register(req, res) {
-  try {
-    const data = req.body;
-    
-    if (!data.email || !data.password) {
-      return handleErrorClient(res, 400, "Email y contraseña son requeridos");
+    try {
+        const data = req.body;
+        const { error } = usuarioBodyValidation.validate(data);
+        if (error) {
+            return handleErrorClient(res, 400, error.details[0].message);
+        }
+
+        if (!data.email || !data.password) {
+            return handleErrorClient(res, 400, "Email y contraseña son requeridos");
+        }
+
+        const hashedPassword = await bcrypt.hash(data.password, 10);
+        const userData = { ...data, password: hashedPassword };
+
+        const newUser = await createUser(userData); 
+        delete newUser.password;
+        handleSuccess(res, 201, "Usuario registrado exitosamente", newUser);
+    } catch (error) {
+        if (error.code == '23505') {
+            handleErrorClient(res, 409, "El email ya está registrado");
+        } else {
+            handleErrorServer(res, 500, "Error interno del servidor", error.message);
+        }
     }
-    
-    const newUser = await createUser(data);
-    delete newUser.password; // Nunca devolver la contraseña
-    handleSuccess(res, 201, "Usuario registrado exitosamente", newUser);
-  } catch (error) {
-    if (error.code === '23505') { // Código de error de PostgreSQL para violación de unique constraint
-      handleErrorClient(res, 409, "El email ya está registrado");
-    } else {
-      handleErrorServer(res, 500, "Error interno del servidor", error.message);
-    }
-  }
 }
 
 const userRepository = AppDataSource.getRepository(User);
@@ -48,9 +56,14 @@ export const updateProfile = async (req, res) => {
         const userId = req.user.id;
         const { email, password } = req.body;
 
-        if (!email && !password) {
+       /*  if (!email && !password) {
             return handleErrorClient(res, 400, "Se requiere email o password para actualizar");
-        }
+        } */
+
+          const { error } = usuarioBodyValidation.validate(req.body);
+         if (error) {
+             return handleErrorClient(res, 400, "Parámetros inválidos", error.message);
+            }
 
         const user = await userRepository.findOne({ where: { id: userId } });
         
